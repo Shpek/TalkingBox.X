@@ -20,12 +20,12 @@ interrupt void Interrupts() {
         PIR1bits.RCIF = 0;
     }
     
-    if (IOCAFbits.IOCAF5) {
+    if (IOCBFbits.IOCBF4) {
         if (!InhibitButtonPress) {
             ButtonPressed = 1;
         }
         
-        IOCAFbits.IOCAF5 = 0;
+        IOCBFbits.IOCBF4 = 0;
     }
     
     if (INTCONbits.TMR0IF) {
@@ -35,6 +35,7 @@ interrupt void Interrupts() {
             for (u8 i = 0; i < ARRLEN(Timers); ++ i) {
                 ++ Timers[i];
             }
+            
             TimerTime = 0;
         }
         
@@ -86,7 +87,7 @@ static u8 DebounceButton() {
     for (u8 i = 0; i < 3; ++ i) {
         __delay_ms(10);
         
-        if (PORTAbits.RA5 != 0) {
+        if (PORTBbits.RB4 != 0) {
             return 0;
         }
     }
@@ -94,21 +95,38 @@ static u8 DebounceButton() {
     return 1;
 }
 
+void test() {
+    // Set the internal oscillator to 4 MHz
+    OSCCON = 0b01101000;
+    
+    // The mp3 player power is on RB0
+    TRISB0 = 0;
+    LATB0 = 0;
+    ANSB4 = 0;
+    
+    while (1) {
+       LATB0 = PORTBbits.RB4;
+    }
+}
+
 void main() {
     // Set the internal oscillator to 4 MHz
     OSCCON = 0b01101000;
     
-    // The mp3 player power is on RA2
-    TRISA2 = 0;
-    LATA2 = 0;
+    // Disable analog input
+    ANSELA = 0;
+    ANSELB = 0;
     
-    // Mp3 player busy pin is on RA4
-    ANSA4 = 0;
-    TRISA4 = 1;
+    // The mp3 player power is on RB0
+    TRISB0 = 0;
+    LATB0 = 0;
+    
+    // Mp3 player busy pin is on RB3
+    TRISB3 = 1;
     
     // Low power sleep mode
-    VREGPM0 = 1;
-    VREGPM1 = 1;
+    // VREGPM0 = 1;
+    // VREGPM1 = 1;
     
     // Start the timer
     TMR0 = 0;
@@ -123,15 +141,15 @@ void main() {
     PEIE = 1;
     GIE = 1;
     
-    // Enable interrupt on falling edge on RA5
+    // Enable interrupt on falling edge on RB4 (play button)
     IOCIE = 1;
-    IOCAN5 = 1;
+    IOCBN4 = 1;
     
     USART_Init();
     
     while (1) {
         // Turn off the mp3 player and sleep
-        LATA2 = 0;
+        LATB0 = 0;
         
         while (1) {
             SLEEP();
@@ -143,12 +161,12 @@ void main() {
         }
         
         // Turn on the mp3 player
-        LATA2 = 1;
+        LATB0 = 1;
         
         // Wait for it to initialize
         __delay_ms(1300);
         u8 goToSleep = 0;
-        u8 button = PORTAbits.RA5 == 0;
+        u8 button = PORTBbits.RB4 == 0;
         
         while (!goToSleep) {
             ButtonPressed = 0;
@@ -171,7 +189,7 @@ void main() {
             Timers[0] = 0;
             
             while (1) {
-                if (PORTAbits.RA4 == 1) {
+                if (PORTBbits.RB3 == 1) {
                     // If the player stopped wait for some time and
                     // go to sleep
                     mp3_stop();
@@ -185,7 +203,7 @@ void main() {
                     Timers[0] = 0;
                 }
 
-                if (PORTAbits.RA5 == 0 && DebounceButton()) {
+                if (PORTBbits.RB4 == 0 && DebounceButton()) {
                     if (!button) {
                         button = 1;
                         mp3_stop();
@@ -197,7 +215,7 @@ void main() {
                         goToSleep = 1;
                         break;
                     }
-                } else if (PORTAbits.RA5 == 1) {
+                } else if (PORTBbits.RB4 == 1) {
                     Timers[1] = 0;
                     button = 0;
                 }
