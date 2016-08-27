@@ -149,4 +149,8 @@ u8 mp3_get_num_files();
 void mp3_wait_for_message();
 void mp3_on_byte_received(u8 byte);
 
+void mp3_get_num_files_async();
+u8 mp3_check_for_result();
+u8 mp3_get_result();
+
 #endif // DFPLAYER_H

@@ -70,7 +70,7 @@ void mp3_fill_checksum () {
 //
 void send () {
 	for (int i=0; i<10; i++) {
-        USART_Putc (send_buf[i]);
+        UsartPutc (send_buf[i]);
 	}
 }
 
@@ -246,6 +246,19 @@ u8 mp3_get_num_files() {
 //        eeprom_write(2 + i, recv_buf[i]);
 //    }
     
+    return recv_buf[6];
+}
+
+void mp3_get_num_files_async() {
+    recv_buf_idx = 0;
+    mp3_send_cmd(0x48);
+}
+
+u8 mp3_check_for_result() {
+    return recv_buf_idx >= 10;
+}
+
+u8 mp3_get_result() {
     return recv_buf[6];
 }
 

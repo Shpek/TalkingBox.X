@@ -3,11 +3,11 @@
 
 #include "config.h"
 
-void USART_Init();
+void UsartInit();
 
-void USART_Putc(u8 c);
+void UsartPutc(u8 c);
 
-void USART_Puts(const u8 *s);
+void UsartPuts(const u8 *s);
 
 #endif	// USART_H
 

@@ -1,14 +1,14 @@
 #include "usart.h"
 
-void USART_Init() {
-    // RA0 - TX, RA1 - RX
+void UsartInit() {
+    // RB2 - TX, RB1 - RX
     // Configure RX and TX portsas digital
-    ANSELAbits.ANSA0 = 0;
-    ANSELAbits.ANSA1 = 0;
+    ANSELBbits.ANSB2 = 0;
+    ANSELBbits.ANSB1 = 0;
     
     // Configure RX as inout and TX as output
-    TRISAbits.TRISA0 = 0;
-    TRISAbits.TRISA1 = 1;
+    TRISBbits.TRISB2 = 0;
+    TRISBbits.TRISB1 = 1;
     
     // Configure baud rate
     TXSTAbits.BRGH = 1;
@@ -26,14 +26,14 @@ void USART_Init() {
     RCSTAbits.SPEN = 1;
 }
 
-void USART_Putc(u8 c) {
+void UsartPutc(u8 c) {
     while (!TXSTAbits.TRMT);
     TXREG = c;
 }
 
-void USART_Puts(const u8 *s) {
+void UsartPuts(const u8 *s) {
     while (*s) {
-        USART_Putc(*s);
+        UsartPutc(*s);
         ++ s;
     }
 }

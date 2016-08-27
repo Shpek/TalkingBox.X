@@ -1,7 +1,10 @@
 #include "config.h"
 #include "dfplayer.h"
 #include "usart.h"
+#include "button.h"
 #include "stdlib.h"
+#include "time.h"
+#include "talkingbox.h"
 
 #define NUM_FILES_IDX       0
 #define LAST_PLAYED_IDX     1
@@ -14,7 +17,24 @@ static u8 ButtonPressed = 0;
 static u8 TimerTime = 0;
 static u8 Timers[] = {0, 0}; // These will increment each second
 
+static u32 Time = 0;
+
+static u8 LedValues[] = {
+    0b01011111, // 0
+    0b00000110, // 1
+    0b10011011, // 2 
+    0b10001111, // 3
+    0b11000110, // 4
+    0b11001101, // 5
+    0b11011101, // 6
+    0b00000111, // 7
+    0b11011111, // 8
+    0b11001111, // 9
+};
+
 interrupt void Interrupts() {
+    TimeUpdate(&Time);
+        
     if (PIR1bits.RCIF) {
         mp3_on_byte_received(RCREG);
         PIR1bits.RCIF = 0;
@@ -28,19 +48,19 @@ interrupt void Interrupts() {
         IOCBFbits.IOCBF4 = 0;
     }
     
-    if (INTCONbits.TMR0IF) {
-        ++ TimerTime;
-        
-        if (TimerTime == 8) {
-            for (u8 i = 0; i < ARRLEN(Timers); ++ i) {
-                ++ Timers[i];
-            }
-            
-            TimerTime = 0;
-        }
-        
-        INTCONbits.TMR0IF = 0;
-    } 
+//    if (INTCONbits.TMR0IF) {
+//        ++ TimerTime;
+//        
+//        if (TimerTime == 8) {
+//            for (u8 i = 0; i < ARRLEN(Timers); ++ i) {
+//                ++ Timers[i];
+//            }
+//            
+//            TimerTime = 0;
+//        }
+//        
+//        INTCONbits.TMR0IF = 0;
+//    } 
 }
 
 void RandomizeFiles(u8 numFiles) {
@@ -102,10 +122,22 @@ void test() {
     // The mp3 player power is on RB0
     TRISB0 = 0;
     LATB0 = 0;
-    ANSB4 = 0;
+    
+    TRISA = 0;
+    ANSELA = 0;
+    ANSELB = 0;
+    
+    u8 c = 0;
     
     while (1) {
-       LATB0 = PORTBbits.RB4;
+        LATA = LedValues[c];
+        __delay_ms(1000);
+        
+        ++ c;
+        
+        if (c == ARRLEN(LedValues)) {
+            c = 0;
+        }
     }
 }
 
@@ -117,39 +149,70 @@ void main() {
     ANSELA = 0;
     ANSELB = 0;
     
+    // 7 segment indicator on RA
+    TRISA = 0;
+    
     // The mp3 player power is on RB0
     TRISB0 = 0;
     LATB0 = 0;
     
     // Mp3 player busy pin is on RB3
     TRISB3 = 1;
-    
-    // Low power sleep mode
-    // VREGPM0 = 1;
-    // VREGPM1 = 1;
-    
-    // Start the timer
-    TMR0 = 0;
-    TMR0CS = 0;
-    PSA = 0;
-    PS0 = 1;
-    PS1 = 1;
-    PS2 = 1;
-    TMR0IE = 1;
-    
+
     // Enable interrupts
     PEIE = 1;
     GIE = 1;
     
-    // Enable interrupt on falling edge on RB4 (play button)
+    // Enable interrupt on falling edge on RB4 (play button) and RB5 (select button)
     IOCIE = 1;
     IOCBN4 = 1;
     
-    USART_Init();
+    UsartInit();
+    TimeInit(&Time, 6, 4, 1);
+    
+    Button b1, b2;
+    ButtonInit(&b1, &PORTB, 4, 0);
+    ButtonInit(&b2, &PORTB, 5, 0);
+  
+    TalkingBoxInit(&b1, &b2);
+    
+    while (1) {
+        TalkingBoxUpdate(Time);
+    }
+    
+ /*   
+    u8 cnt = 0;
+    u8 currentTrack = 0;
     
     while (1) {
         // Turn off the mp3 player and sleep
         LATB0 = 0;
+        
+        while (1) {
+            SLEEP();
+            NOP();
+            
+            ButtonReset(&b1);
+            ButtonReset(&b2);
+            
+            while (1) {
+                if (ButtonUpdate(&b1, Time) && b1.state == Pressed) {
+                    // Woke up by the play button - play the current track
+                }
+                
+                if (ButtonUpdate(&b2, Time) && b2.state == Pressed) {
+                    // Woke up by the select button - just warm up the player
+                }
+            }
+        }
+        
+        LATA = LedValues[cnt % 10];
+    }
+    
+    while (1) {
+        // Turn off the mp3 player and sleep
+        LATB0 = 0;
+        LATA = 0;
         
         while (1) {
             SLEEP();
@@ -162,6 +225,7 @@ void main() {
         
         // Turn on the mp3 player
         LATB0 = 1;
+        LATA = LedValues[8];
         
         // Wait for it to initialize
         __delay_ms(1300);
@@ -222,6 +286,7 @@ void main() {
             }
         }
     }
-    
+*/    
     return;
 }
+
