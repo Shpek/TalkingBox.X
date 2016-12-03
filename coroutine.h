@@ -131,8 +131,9 @@
 /*
  * `scr' macros for static coroutines.
  */
-
-#define scrBegin         static int scrLine = 0; switch(scrLine) { case 0:;
+#define scrDeclare       volatile static int scrLine = 0;
+#define scrReset         scrLine = 0;
+#define scrBegin         switch(scrLine) { case 0:;
 #define scrFinish(z)     } return (z)
 #define scrFinishV       } return
 

@@ -3,6 +3,8 @@
 #include "dfplayer.h"
 #include "coroutine.h"
 
+const u32 PowerOffTime = 60000;
+
 typedef enum {
     Enter,
     Update,
@@ -16,8 +18,9 @@ typedef enum {
     StandBy,
     PlayTrack,
 
+    Continue,
     Restart,      
-    Last,
+    None,
 } State;
 
 typedef State (*StateFunc)(StateAction);
@@ -56,37 +59,37 @@ static u8 LedValues[] = {
     0b00000000, // 16 (off)
 };
 
-static StateFunc CurrentState = NULL;
-static u32 StateWaitUntil = 0;
+static State CurrentState = None;
 static Button *BtnPlay;
 static Button *BtnSelect;
 static u32 Time;
+static u32 StateWaitUntil = 0;
 static u8 TrackNumber = 0; // 0 = play random track
 static u8 GoToPlayTrack = 0;
 static u8 NumTracks = 0;
 
 static void StateSwitch(State newState) {
     do {
-        if (CurrentState != NULL) {
-            CurrentState(Exit);
+        if (CurrentState != None) {
+            StatesMapping[CurrentState](Exit);
         }
         
         if (newState != Restart) {
-            CurrentState = StatesMapping[newState];
+            CurrentState = newState;
         }
         
-        newState = CurrentState(Enter);
-    } while (StatesMapping[newState] != CurrentState);
+        newState = StatesMapping[CurrentState](Enter);
+    } while (newState != Continue && newState != CurrentState);
 }
 
-static void StateUpdate() {
-    if (CurrentState == NULL) {
+static void StateUpdate() {    
+    if (CurrentState == None) {
         return;
     }
     
-    State newState = CurrentState(Update);
-    
-    if (StatesMapping[newState] != CurrentState) {
+    State newState = StatesMapping[CurrentState](Update);
+        
+    if (newState != Continue && newState != CurrentState) {
         StateSwitch(newState);
     }
 }
@@ -100,8 +103,14 @@ void TalkingBoxInit(Button *btnPlay, Button *btnSelect)
 void TalkingBoxUpdate(u32 time)
 {
     Time = time;
+    ButtonUpdate(BtnPlay, Time);
+    ButtonUpdate(BtnSelect, Time);
     
-    if (CurrentState == NULL) {
+    if (CurrentState == None) {
+        StateSwitch(Sleep);
+    }
+    
+    if (BtnPlay->state == Pressed && BtnPlay->stateChangeTime + 2000 < Time) {
         StateSwitch(Sleep);
     }
     
@@ -118,6 +127,10 @@ inline static void TurnOff7SegmentDisplay() {
 
 inline static void Set7SegmentDisplay(u8 number) {
     LATA = LedValues[number];
+}
+
+inline static u8 PlayerPlaying() {
+    return PORTBbits.RB3 == 0;
 }
 
 inline static void RotateTrack() {
@@ -159,12 +172,12 @@ static State StateWakingUp(StateAction action) {
     }
     
     if (action == Update) {
-        if (ButtonUpdate(BtnPlay, Time) && BtnPlay->state == Pressed) {
+        if (BtnPlay->stateChanged && BtnPlay->state == Pressed) {
             GoToPlayTrack = 1;
             return InitPlayer;
         }
         
-        if (ButtonUpdate(BtnSelect, Time) && BtnSelect->state == Pressed) {
+        if (BtnSelect->stateChanged && BtnSelect->state == Pressed) {
             return InitPlayer;
         }
         
@@ -176,99 +189,122 @@ static State StateWakingUp(StateAction action) {
     return WakingUp;
 }
 
+#define scrSleep(ms) StateWaitUntil = Time + (ms); scrReturn(Continue)
+
 static State StateInitPlayer(StateAction action) {
-    static u32 playerInitTime;
-    static u32 numFilesTimeout;
+    scrDeclare;
 
     if (action == Enter) {
         PowerToPeripherals(1);
-        playerInitTime = Time + 1300;
-        numFilesTimeout = 0;
         NumTracks = 0;
-        return InitPlayer;
+        scrReset;
+        return Continue;
     }
     
     if (action == Update) {
-        if (ButtonUpdate(BtnPlay, Time) && BtnPlay->state == Pressed) {
+        if (BtnPlay->stateChanged && BtnPlay->state == Pressed) {
             GoToPlayTrack = 1;
         }
 
-        if (ButtonUpdate(BtnSelect, Time) && BtnSelect->state == Pressed) {
+        if (BtnSelect->stateChanged && BtnSelect->state == Pressed) {
             RotateTrack();
             Set7SegmentDisplay(TrackNumber);
         }
         
-        if (Time < playerInitTime) {
-            return InitPlayer;
+        if (Time < StateWaitUntil) {
+            return Continue;
         }
         
-        if (numFilesTimeout > 0 && Time >= numFilesTimeout) {
-            return Sleep;
-        }
+        scrBegin;
+        scrSleep(1300);
+        static u32 numFilesTimeout;
+        numFilesTimeout = Time + 1000;
+        mp3_set_volume(15);
+        scrSleep(20);
+        mp3_get_num_files_async();
         
-        if (numFilesTimeout == 0) {
-            numFilesTimeout = Time + 1000;
-            mp3_get_num_files_async();
-            return InitPlayer;
-        }
         
-        if (mp3_check_for_result()) {
-            NumTracks = mp3_get_result();
+        
+        while (1) {
+            scrReturn(Continue);
             
-            if (NumTracks == 0) {
-                return Sleep;
+            if (Time > numFilesTimeout) {
+                scrReturn(Sleep);
             }
+            
+            if (!mp3_check_for_result()) {
+                continue;
+            }
+
+            NumTracks = mp3_get_result();
             
             if (TrackNumber > NumTracks) {
                 TrackNumber = NumTracks;
                 Set7SegmentDisplay(TrackNumber);
             }
             
-            if (GoToPlayTrack) {
-                return PlayTrack;
-            }
             
-            return StandBy;
+            
+            
+            if (NumTracks == 0) {
+                scrReturn(Sleep);
+            }
+
+            if (GoToPlayTrack) {
+                scrReturn(PlayTrack);
+            }
+
+            scrReturn(StandBy);
         }
+        
+        // Shouldn't come here
+        scrFinish(None);
     }
     
-    return InitPlayer;
+    return Continue;
 }
 
 static State StateStandBy(StateAction action) {
+    static u32 turnOffTime;
+    
+    if (action == Enter) {
+        turnOffTime = Time + PowerOffTime;
+    }
+    
     if (action == Update) {
-        if (ButtonUpdate(BtnPlay, Time) && BtnPlay->state == Pressed) {
+        if (BtnPlay->stateChanged && BtnPlay->state == Pressed) {
             return PlayTrack;
         }
 
-        if (ButtonUpdate(BtnSelect, Time) && BtnSelect->state == Pressed) {
+        if (BtnSelect->stateChanged && BtnSelect->state == Pressed) {
             RotateTrack();
             Set7SegmentDisplay(TrackNumber);
             return StandBy;
+        }
+        
+        if (Time > turnOffTime) {
+            return Sleep;
         }
     }
     
     return StandBy;
 }
 
-#define SleepMs(ms) waitUntil = Time + (ms); seq = seq + 1
-
 static void DumpU32(u32 num) {    
     for (int i = 0; i < 8; ++ i) {
         TurnOff7SegmentDisplay();
-        __delay_ms(1000);
+        __delay_ms(500);
 
         Set7SegmentDisplay(num & 0x0000000F);
-        __delay_ms(1000);
+        __delay_ms(500);
         
         num = num >> 4;
     }
 }
 
 static State StatePlayTrack(StateAction action) {
+    scrDeclare;
     static u8 trackNumber;
-    static u8 seq;
-    static u32 waitUntil = 0;
 
     if (action == Enter) {
         if (TrackNumber == 0) {
@@ -279,45 +315,55 @@ static State StatePlayTrack(StateAction action) {
             trackNumber = TrackNumber - 1;
         }
         
-        seq = 0;
-        waitUntil = 0;
-        return PlayTrack;
+        scrReset;
+        return Continue;
     }
     
     if (action == Update) {
-        if (ButtonUpdate(BtnSelect, Time) && BtnSelect->state == Pressed) {
+        if (BtnSelect->stateChanged && BtnSelect->state == Pressed) {
             RotateTrack();
             Set7SegmentDisplay(TrackNumber);
         }
 
-        if (Time < waitUntil) {
-            return PlayTrack;
+        if (Time < StateWaitUntil) {
+            return Continue;
         }
         
-        switch (seq) {
-            case 0:
-                SleepMs(10);
+        scrBegin;
+        mp3_play_num(trackNumber);
+        
+        // Wait for player to start
+        static u32 enterStandbyTime;
+        enterStandbyTime = Time + 1000;
+        
+        while (1) {
+            if (PlayerPlaying()) {
                 break;
-                
-            case 1: 
-                mp3_set_volume(15); 
-                SleepMs(300);
-                break;
-                
-            case 2:
-                mp3_play_num(trackNumber);
-                SleepMs(10);
-                break;
+            }
             
-            case 3: {                
-                if (ButtonUpdate(BtnPlay, Time) && BtnPlay->state == Pressed) {
-                    return Restart;
-                }
-                
-                break;
-            }  
+            if (Time > enterStandbyTime) {
+                scrReturn(StandBy);
+            }
+            
+            scrReturn(Continue);
         }
+
+        // Wait for the player to stop
+        while (1) {
+            if (BtnPlay->stateChanged && BtnPlay->state == Pressed) {
+                scrReturn(Restart);
+            }
+            
+            if (!PlayerPlaying()) {
+                scrReturn(StandBy);
+            }
+            
+            scrReturn(Continue);
+        }
+        
+        // Shouldn't come here
+        scrFinish(None);
     }
     
-    return PlayTrack;
+    return Continue;
 }
