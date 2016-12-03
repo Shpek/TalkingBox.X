@@ -41,11 +41,11 @@ interrupt void Interrupts() {
     }
     
     if (IOCBFbits.IOCBF4) {
-        if (!InhibitButtonPress) {
-            ButtonPressed = 1;
-        }
-        
         IOCBFbits.IOCBF4 = 0;
+    }
+    
+    if (IOCBFbits.IOCBF5) {
+        IOCBFbits.IOCBF5 = 0;
     }
     
 //    if (INTCONbits.TMR0IF) {
@@ -166,9 +166,10 @@ void main() {
     // Enable interrupt on falling edge on RB4 (play button) and RB5 (select button)
     IOCIE = 1;
     IOCBN4 = 1;
+    IOCBN5 = 1;
     
     UsartInit();
-    TimeInit(&Time, 6, 4, 1);
+    TimeInit(&Time, 6, 1, 2);
     
     Button b1, b2;
     ButtonInit(&b1, &PORTB, 4, 0);

@@ -1,6 +1,7 @@
 #include "talkingbox.h"
 #include "stdlib.h"
 #include "dfplayer.h"
+#include "coroutine.h"
 
 typedef enum {
     Enter,
@@ -15,6 +16,7 @@ typedef enum {
     StandBy,
     PlayTrack,
 
+    Restart,      
     Last,
 } State;
 
@@ -45,25 +47,36 @@ static u8 LedValues[] = {
     0b00000111, // 7
     0b11011111, // 8
     0b11001111, // 9
+    0b11010111, // A
+    0b11011100, // B
+    0b01011001, // C
+    0b10011110, // D
+    0b11011001, // E
+    0b11010001, // F
+    0b00000000, // 16 (off)
 };
 
 static StateFunc CurrentState = NULL;
+static u32 StateWaitUntil = 0;
 static Button *BtnPlay;
 static Button *BtnSelect;
 static u32 Time;
 static u8 TrackNumber = 0; // 0 = play random track
 static u8 GoToPlayTrack = 0;
-static u8 NumFiles = 0;
+static u8 NumTracks = 0;
 
 static void StateSwitch(State newState) {
-    while (StatesMapping[newState] != CurrentState) {
+    do {
         if (CurrentState != NULL) {
             CurrentState(Exit);
         }
         
-        CurrentState = StatesMapping[newState];
+        if (newState != Restart) {
+            CurrentState = StatesMapping[newState];
+        }
+        
         newState = CurrentState(Enter);
-    }
+    } while (StatesMapping[newState] != CurrentState);
 }
 
 static void StateUpdate() {
@@ -99,6 +112,10 @@ inline static void PowerToPeripherals(u8 on) {
     LATB0 = on;
 }
 
+inline static void TurnOff7SegmentDisplay() {
+    LATA = LedValues[16];
+}
+
 inline static void Set7SegmentDisplay(u8 number) {
     LATA = LedValues[number];
 }
@@ -106,7 +123,7 @@ inline static void Set7SegmentDisplay(u8 number) {
 inline static void RotateTrack() {
     ++ TrackNumber;
     
-    if (TrackNumber > 9) {
+    if (TrackNumber > 9 || (NumTracks > 0 && TrackNumber > NumTracks)) {
         TrackNumber = 0;
     }
 }
@@ -118,6 +135,7 @@ static State StateSleep(StateAction action) {
         // Stop the mp3 player and the 7 segment indicator and
         // put the MCU to sleep
         PowerToPeripherals(0);
+        TurnOff7SegmentDisplay();
         SLEEP();
         NOP();
         
@@ -135,7 +153,8 @@ static State StateWakingUp(StateAction action) {
     if (action == Enter) {
         ButtonReset(BtnPlay);
         ButtonReset(BtnSelect);
-        wakeUpTime = Time;
+        wakeUpTime = Time + 100;
+        Set7SegmentDisplay(TrackNumber);
         return WakingUp;
     }
     
@@ -149,7 +168,7 @@ static State StateWakingUp(StateAction action) {
             return InitPlayer;
         }
         
-        if (Time - wakeUpTime >= 100) {
+        if (Time >= wakeUpTime) {
             return Sleep;
         }
     }
@@ -160,12 +179,12 @@ static State StateWakingUp(StateAction action) {
 static State StateInitPlayer(StateAction action) {
     static u32 playerInitTime;
     static u32 numFilesTimeout;
-    
+
     if (action == Enter) {
         PowerToPeripherals(1);
-        Set7SegmentDisplay(TrackNumber);
         playerInitTime = Time + 1300;
         numFilesTimeout = 0;
+        NumTracks = 0;
         return InitPlayer;
     }
     
@@ -184,7 +203,7 @@ static State StateInitPlayer(StateAction action) {
         }
         
         if (numFilesTimeout > 0 && Time >= numFilesTimeout) {
-            return StandBy;
+            return Sleep;
         }
         
         if (numFilesTimeout == 0) {
@@ -194,10 +213,15 @@ static State StateInitPlayer(StateAction action) {
         }
         
         if (mp3_check_for_result()) {
-            NumFiles = mp3_get_result();
+            NumTracks = mp3_get_result();
             
-            if (NumFiles == 0) {
+            if (NumTracks == 0) {
                 return Sleep;
+            }
+            
+            if (TrackNumber > NumTracks) {
+                TrackNumber = NumTracks;
+                Set7SegmentDisplay(TrackNumber);
             }
             
             if (GoToPlayTrack) {
@@ -220,12 +244,80 @@ static State StateStandBy(StateAction action) {
         if (ButtonUpdate(BtnSelect, Time) && BtnSelect->state == Pressed) {
             RotateTrack();
             Set7SegmentDisplay(TrackNumber);
+            return StandBy;
         }
     }
     
     return StandBy;
 }
 
+#define SleepMs(ms) waitUntil = Time + (ms); seq = seq + 1
+
+static void DumpU32(u32 num) {    
+    for (int i = 0; i < 8; ++ i) {
+        TurnOff7SegmentDisplay();
+        __delay_ms(1000);
+
+        Set7SegmentDisplay(num & 0x0000000F);
+        __delay_ms(1000);
+        
+        num = num >> 4;
+    }
+}
+
 static State StatePlayTrack(StateAction action) {
-    return StandBy;
+    static u8 trackNumber;
+    static u8 seq;
+    static u32 waitUntil = 0;
+
+    if (action == Enter) {
+        if (TrackNumber == 0) {
+            // Random track
+            trackNumber = 0;
+        } else {
+            // Predefined track
+            trackNumber = TrackNumber - 1;
+        }
+        
+        seq = 0;
+        waitUntil = 0;
+        return PlayTrack;
+    }
+    
+    if (action == Update) {
+        if (ButtonUpdate(BtnSelect, Time) && BtnSelect->state == Pressed) {
+            RotateTrack();
+            Set7SegmentDisplay(TrackNumber);
+        }
+
+        if (Time < waitUntil) {
+            return PlayTrack;
+        }
+        
+        switch (seq) {
+            case 0:
+                SleepMs(10);
+                break;
+                
+            case 1: 
+                mp3_set_volume(15); 
+                SleepMs(300);
+                break;
+                
+            case 2:
+                mp3_play_num(trackNumber);
+                SleepMs(10);
+                break;
+            
+            case 3: {                
+                if (ButtonUpdate(BtnPlay, Time) && BtnPlay->state == Pressed) {
+                    return Restart;
+                }
+                
+                break;
+            }  
+        }
+    }
+    
+    return PlayTrack;
 }

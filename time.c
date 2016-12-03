@@ -10,7 +10,10 @@ void TimeInit(u32 *pTime, u8 initialValue, u8 period, u8 msPerPeriod) {
     MsPerPeriod = msPerPeriod;
     TMR0 = initialValue;
     TMR0CS = 0;
-    PSA = 1;
+    PSA = 0;  // Prescaler set to 1:8
+    PS2 = 0;
+    PS1 = 1;
+    PS0 = 0;
     TMR0IE = 1;
     *pTime = 0;
 }

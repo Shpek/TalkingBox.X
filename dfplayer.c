@@ -251,6 +251,7 @@ u8 mp3_get_num_files() {
 
 void mp3_get_num_files_async() {
     recv_buf_idx = 0;
+    recv_buf[6] = 0;
     mp3_send_cmd(0x48);
 }
 
