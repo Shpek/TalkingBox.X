@@ -2,7 +2,7 @@
 
 void UsartInit() {
     // RB2 - TX, RB1 - RX
-    // Configure RX and TX portsas digital
+    // Configure RX and TX ports as digital
     ANSELBbits.ANSB2 = 0;
     ANSELBbits.ANSB1 = 0;
     

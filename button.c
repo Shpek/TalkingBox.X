@@ -3,7 +3,7 @@
 typedef struct {
     volatile u8 *pPort;
     u8 mask;
-    u8 buttonEdge;
+    u8 edge;
     u8 debounceCount;
     u8 state;
     u32 nextUpdateTime;
@@ -12,12 +12,12 @@ typedef struct {
 static InternalState States[BUTTON_MAX_BUTTONS];
 static u8 NextState = 0;
 
-void ButtonInit(Button *pb, volatile u8 *pPort, u8 pin, u8 buttonEdge) {
+void ButtonInit(Button *pb, volatile u8 *pPort, u8 pin, u8 edge) {
     InternalState *ps = &States[NextState];
     ++ NextState;
     ps->pPort = pPort;
     ps->mask = 1 << pin;
-    ps->buttonEdge = buttonEdge;
+    ps->edge = edge;
     ps->state = 1;
     ps->nextUpdateTime = 0;
     
@@ -47,9 +47,14 @@ u8 ButtonUpdate(Button *pb, u32 time) {
 
     switch (ps->state) {        
         case 1: { // Check state
-            u8 pressed = !!(*ps->pPort & ps->mask) == ps->buttonEdge;
+            u8 pressed = !!(*ps->pPort & ps->mask) == ps->edge;
             
-            if (pb->state != pressed || pb->state == Unknown) {
+            u8 changedState = 
+                    (pb->state == Pressed && !pressed) ||
+                    (pb->state == Released && pressed) ||
+                    pb->state == Unknown;
+            
+            if (changedState) {
                 // Button pressed/released, start debounce
                 ps->debounceCount = BUTTON_DEBOUNCE_COUNT;
                 ps->state = 2;
@@ -59,7 +64,7 @@ u8 ButtonUpdate(Button *pb, u32 time) {
         break;
             
         case 2: { // Debounce state
-            u8 pressed = !!(*ps->pPort & ps->mask) == ps->buttonEdge;
+            u8 pressed = !!(*ps->pPort & ps->mask) == ps->edge;
 
             if (pb->state != pressed || pb->state == Unknown) {
                 -- ps->debounceCount;

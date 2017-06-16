@@ -3,7 +3,11 @@
 #include "dfplayer.h"
 #include "coroutine.h"
 
-const u32 PowerOffTime = 60000;
+const u32 POWER_OFF_TIME = 60000;
+const u8 NUM_FILES_IDX = 0;
+const u8 LAST_PLAYED_IDX = 1;
+const u8 RNG_SEED_IDX = 2;
+const u8 RANDOM_FILES_START = 3;
 
 typedef enum {
     Enter,
@@ -141,6 +145,46 @@ inline static void RotateTrack() {
     }
 }
 
+static void RandomizeFiles(u8 numFiles) {
+    u8 seed = eeprom_read(RNG_SEED_IDX);
+    seed = seed - 1;
+    eeprom_write(RNG_SEED_IDX, seed);
+    srand(seed);
+    
+    for (u8 i = 0; i < numFiles; ++ i) {
+        eeprom_write(RANDOM_FILES_START + i, i + 1);
+    }
+    
+    for (u8 i = numFiles - 1; i >= 1; -- i) {
+        u8 j = rand() % (i + 1);
+        u8 el1 = eeprom_read(RANDOM_FILES_START + i);
+        u8 el2 = eeprom_read(RANDOM_FILES_START + j);
+        eeprom_write(RANDOM_FILES_START + i, el2);
+        eeprom_write(RANDOM_FILES_START + j, el1);
+    }
+}
+
+static u8 GetRandomTrackNumber(u8 numFiles) {
+    u8 storedNumFiles = eeprom_read(NUM_FILES_IDX);
+    
+    if (storedNumFiles == numFiles) {
+        u8 nextFile = eeprom_read(LAST_PLAYED_IDX) + 1;
+        
+        if (nextFile == numFiles) {
+            RandomizeFiles(numFiles);
+            nextFile = 0;
+        }
+        
+        eeprom_write(LAST_PLAYED_IDX, nextFile);
+        return eeprom_read(RANDOM_FILES_START + nextFile);
+    } else {
+        RandomizeFiles(numFiles);
+        eeprom_write(NUM_FILES_IDX, numFiles);
+        eeprom_write(LAST_PLAYED_IDX, 0);
+        return eeprom_read(RANDOM_FILES_START);
+    }
+}
+
 static State StateSleep(StateAction action) {
     if (action == Enter) {
         GoToPlayTrack = 0;
@@ -222,9 +266,7 @@ static State StateInitPlayer(StateAction action) {
         mp3_set_volume(15);
         scrSleep(20);
         mp3_get_num_files_async();
-        
-        
-        
+               
         while (1) {
             scrReturn(Continue);
             
@@ -241,10 +283,7 @@ static State StateInitPlayer(StateAction action) {
             if (TrackNumber > NumTracks) {
                 TrackNumber = NumTracks;
                 Set7SegmentDisplay(TrackNumber);
-            }
-            
-            
-            
+            }           
             
             if (NumTracks == 0) {
                 scrReturn(Sleep);
@@ -268,7 +307,7 @@ static State StateStandBy(StateAction action) {
     static u32 turnOffTime;
     
     if (action == Enter) {
-        turnOffTime = Time + PowerOffTime;
+        turnOffTime = Time + POWER_OFF_TIME;
     }
     
     if (action == Update) {
@@ -309,7 +348,8 @@ static State StatePlayTrack(StateAction action) {
     if (action == Enter) {
         if (TrackNumber == 0) {
             // Random track
-            trackNumber = 0;
+            trackNumber = GetRandomTrackNumber(NumTracks);
+            // trackNumber = 0;
         } else {
             // Predefined track
             trackNumber = TrackNumber - 1;

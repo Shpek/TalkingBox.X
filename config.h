@@ -27,12 +27,12 @@
 
 typedef int8_t i8;
 typedef int16_t i16;
-typedef int24_t i24;
 typedef int32_t i32;
 
 typedef uint8_t u8;
 typedef uint16_t u16;
-typedef uint24_t u24;
 typedef uint32_t u32;
+
+#define ARRLEN(arr) (sizeof(arr)/sizeof(0[arr]))
 
 #endif // define CONFIG_H
